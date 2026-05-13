@@ -1,0 +1,10 @@
+node_modules/
+npm-debug.log*
+.DS_Store
+*.tgz
+coverage/
+.env
+contexts.json
+contexts.json.tmp
+*.corrupt-*
+.contexts.lock/
