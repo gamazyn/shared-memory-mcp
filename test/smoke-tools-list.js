@@ -37,6 +37,8 @@ const tools = responses.find(response => response.id === 2).result.tools.map(too
 assert.deepEqual(tools.sort(), [
   "ack_handoff",
   "create_handoff",
+  "create_snapshot",
+  "get_project_brief",
   "list_contexts",
   "list_handoffs",
   "peek_handoff",
@@ -44,6 +46,7 @@ assert.deepEqual(tools.sort(), [
   "read_latest_context",
   "reopen_handoff",
   "save_context",
+  "save_memory",
   "search_memory"
 ].sort())
 
