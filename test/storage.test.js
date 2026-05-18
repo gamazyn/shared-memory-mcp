@@ -154,6 +154,111 @@ test("retention keeps pending handoffs before ordinary contexts", async () => {
   }
 })
 
+test("store filters contexts by namespace and treats legacy entries as default namespace", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const storageFile = join(dir, "contexts.json")
+    await writeJson(storageFile, {
+      contexts: [{
+        id: "legacy-context",
+        agent: "agent-a",
+        title: "Legacy note",
+        content: "Visible in default namespace.",
+        tags: [],
+        timestamp: new Date().toISOString(),
+        type: "context"
+      }]
+    })
+
+    const store = createSharedMemoryStore({ storageFile })
+    store.saveContext({
+      namespace: "project-alpha",
+      agent: "agent-a",
+      title: "Alpha note",
+      content: "Only visible in alpha."
+    })
+    store.saveContext({
+      namespace: "project-beta",
+      agent: "agent-a",
+      title: "Beta note",
+      content: "Only visible in beta."
+    })
+
+    assert.deepEqual(
+      store.listContexts({ namespace: "project-alpha", limit: 10 }).map(item => item.title),
+      ["Alpha note"]
+    )
+    assert.deepEqual(
+      store.listContexts({ namespace: "default", limit: 10 }).map(item => item.title),
+      ["Legacy note"]
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store searches memory by query, tags, agent, type, and namespace", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({ storageFile: join(dir, "contexts.json") })
+    store.saveContext({
+      namespace: "project-alpha",
+      agent: "planner",
+      title: "Database decision",
+      content: "Use local JSON storage for now.",
+      tags: ["architecture", "storage"]
+    })
+    store.saveContext({
+      namespace: "project-beta",
+      agent: "planner",
+      title: "Search decision",
+      content: "Use SQLite full text search later.",
+      tags: ["architecture"]
+    })
+
+    const results = store.searchMemory({
+      namespace: "project-alpha",
+      query: "json",
+      agent: "planner",
+      tags: ["storage"],
+      type: "context",
+      limit: 10
+    })
+
+    assert.equal(results.length, 1)
+    assert.equal(results[0].title, "Database decision")
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store supports handoff peek, ack, reopen, and status filtering", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({ storageFile: join(dir, "contexts.json") })
+    const handoff = store.createHandoff({
+      namespace: "project-alpha",
+      to: "implementer",
+      summary: "Discovery complete.",
+      context: "Build the searchable storage API."
+    })
+
+    const peeked = store.peekHandoff({ namespace: "project-alpha", agent: "implementer" })
+    assert.equal(peeked.id, handoff.id)
+    assert.equal(store.listHandoffs({ namespace: "project-alpha", agent: "implementer", status: "pending" }).length, 1)
+
+    const acked = store.ackHandoff({ namespace: "project-alpha", id: handoff.id })
+    assert.equal(acked.read, true)
+    assert.equal(store.listHandoffs({ namespace: "project-alpha", agent: "implementer", status: "read" }).length, 1)
+
+    const reopened = store.reopenHandoff({ namespace: "project-alpha", id: handoff.id })
+    assert.equal(reopened.read, false)
+    assert.equal(reopened.readAt, undefined)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 async function writeJson(filePath, data) {
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(data, null, 2))

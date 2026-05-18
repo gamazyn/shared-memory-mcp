@@ -35,11 +35,16 @@ const responses = output.trim().split("\n").map(line => JSON.parse(line))
 const tools = responses.find(response => response.id === 2).result.tools.map(tool => tool.name)
 
 assert.deepEqual(tools.sort(), [
+  "ack_handoff",
   "create_handoff",
   "list_contexts",
+  "list_handoffs",
+  "peek_handoff",
   "read_handoff",
   "read_latest_context",
-  "save_context"
+  "reopen_handoff",
+  "save_context",
+  "search_memory"
 ].sort())
 
 console.log("smoke OK")

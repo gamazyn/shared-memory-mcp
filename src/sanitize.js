@@ -2,6 +2,7 @@ const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
 
 export const INPUT_LIMITS = {
   agent: 100,
+  namespace: 100,
   title: 200,
   content: 200000,
   tag: 64,
@@ -40,19 +41,26 @@ export function sanitizeTags(tags = []) {
   return sanitized
 }
 
-export function sanitizeContextInput({ agent, title, content, tags = [] }) {
+export function sanitizeContextInput({ agent, namespace, title, content, tags = [] }) {
   return {
     agent: sanitizeText(agent, "agent", INPUT_LIMITS.agent),
+    namespace: sanitizeOptionalNamespace(namespace),
     title: sanitizeText(title, "title", INPUT_LIMITS.title),
     content: sanitizeText(content, "content", INPUT_LIMITS.content),
     tags: sanitizeTags(tags)
   }
 }
 
-export function sanitizeHandoffInput({ to, summary, context }) {
+export function sanitizeHandoffInput({ namespace, to, summary, context }) {
   return {
+    namespace: sanitizeOptionalNamespace(namespace),
     to: sanitizeText(to, "to", INPUT_LIMITS.agent),
     summary: sanitizeText(summary, "summary", INPUT_LIMITS.title),
     context: sanitizeText(context, "context", INPUT_LIMITS.content)
   }
+}
+
+export function sanitizeOptionalNamespace(namespace) {
+  if (namespace === undefined || namespace === null || namespace === "") return "default"
+  return sanitizeText(namespace, "namespace", INPUT_LIMITS.namespace)
 }
