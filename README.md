@@ -15,6 +15,8 @@ The server stores small pieces of local context in a JSON file and exposes MCP t
 - Read, peek, acknowledge, reopen, and list handoffs.
 - List recent contexts and handoffs.
 - Local-only JSON storage.
+- CLI commands for inspection, import/export, pruning, backups, and doctor checks.
+- Optional local secret redaction before storage.
 - Atomic writes, process lock, stale-lock recovery, and pending-handoff-aware retention.
 - Install helpers for Claude Code and Codex.
 
@@ -108,6 +110,26 @@ Environment variables:
 | `SHARED_MEMORY_MCP_MAX_ITEMS` | `50` | Maximum retained items. Pending handoffs are kept first. |
 | `SHARED_MEMORY_MCP_READ_HANDOFF_TTL_DAYS` | `7` | Days to keep read handoffs before auto-clean removes them. |
 | `SHARED_MEMORY_MCP_DELETE_READ_HANDOFFS` | `false` | Delete a handoff immediately after it is read. |
+| `SHARED_MEMORY_MCP_REDACT_SECRETS` | `false` | Mask common token and secret patterns before storage. |
+| `SHARED_MEMORY_MCP_BACKUP_DIR` | `~/.shared-memory-mcp/backups` | Backup directory used before import and prune operations. |
+| `SHARED_MEMORY_MCP_DEFAULT_NAMESPACE` | `default` | Namespace used when a tool or CLI command omits one. |
+
+## CLI
+
+Running `shared-memory-mcp` with no arguments starts the MCP server. With a subcommand, it runs local maintenance commands:
+
+```bash
+shared-memory-mcp list
+shared-memory-mcp search "storage"
+shared-memory-mcp handoffs --agent codex --status pending
+shared-memory-mcp export ./memory.json
+shared-memory-mcp export ./memory.md
+shared-memory-mcp import ./memory.json
+shared-memory-mcp prune --keep 20
+shared-memory-mcp doctor
+```
+
+The CLI uses the same environment variables as the MCP server.
 
 ## Input Safety And Cleanup
 

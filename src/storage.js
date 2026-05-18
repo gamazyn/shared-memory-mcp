@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -30,6 +31,14 @@ const LOCK_RETRY_MS = 20
 const LOCK_TIMEOUT_MS = 5000
 const LOCK_STALE_MS = 30000
 const DEFAULT_NAMESPACE = "default"
+
+function redactSecrets(value) {
+  return value
+    .replace(/\b(?:gho|ghp|github_pat)_[A-Za-z0-9_]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\b(api[_-]?key|token|secret|password)=([^\s]+)/gi, "$1=[REDACTED_SECRET]")
+}
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
@@ -158,6 +167,25 @@ export function createSharedMemoryStore(options = {}) {
   const storageDir = dirname(storageFile)
   const lockDir = join(storageDir, ".contexts.lock")
   const tempFile = `${storageFile}.tmp`
+  const backupDir = options.backupDir
+  const redactEnabled = options.redactSecrets === true
+  const defaultNamespace = options.defaultNamespace ?? DEFAULT_NAMESPACE
+
+  function resolveNamespace(namespace) {
+    return sanitizeOptionalNamespace(namespace || defaultNamespace)
+  }
+
+  function redactContent(content) {
+    return redactEnabled ? redactSecrets(content) : content
+  }
+
+  function backupStorage() {
+    if (!backupDir || !existsSync(storageFile)) return null
+    if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true })
+    const backupFile = join(backupDir, `contexts-${Date.now()}.json`)
+    copyFileSync(storageFile, backupFile)
+    return backupFile
+  }
 
   function load() {
     if (!existsSync(storageFile)) return { contexts: [] }
@@ -189,7 +217,7 @@ export function createSharedMemoryStore(options = {}) {
 
   return {
     saveContext({ agent, namespace, title, content, tags = [] }) {
-      const input = sanitizeContextInput({ agent, namespace, title, content, tags })
+      const input = sanitizeContextInput({ agent, namespace: resolveNamespace(namespace), title, content, tags })
       return update(data => {
         const entry = {
           id: randomUUID(),
@@ -197,7 +225,7 @@ export function createSharedMemoryStore(options = {}) {
           namespace: input.namespace,
           kind: input.kind,
           title: input.title,
-          content: input.content,
+          content: redactContent(input.content),
           tags: input.tags,
           timestamp: new Date().toISOString(),
           type: "context"
@@ -208,7 +236,7 @@ export function createSharedMemoryStore(options = {}) {
     },
 
     createHandoff({ namespace, to, summary, context }) {
-      const input = sanitizeHandoffInput({ namespace, to, summary, context })
+      const input = sanitizeHandoffInput({ namespace: resolveNamespace(namespace), to, summary, context })
       return update(data => {
         const entry = {
           id: randomUUID(),
@@ -217,7 +245,7 @@ export function createSharedMemoryStore(options = {}) {
           kind: input.kind,
           to: input.to,
           title: `Handoff to ${input.to}`,
-          content: `## Summary\n${input.summary}\n\n## Full Context\n${input.context}`,
+          content: `## Summary\n${redactContent(input.summary)}\n\n## Full Context\n${redactContent(input.context)}`,
           tags: ["handoff"],
           timestamp: new Date().toISOString(),
           type: "handoff",
@@ -230,7 +258,7 @@ export function createSharedMemoryStore(options = {}) {
 
     readHandoff({ agent, namespace }) {
       const safeAgent = sanitizeText(agent, "agent", INPUT_LIMITS.agent)
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       return update(data => {
         const entry = data.contexts.find(context =>
           context.type === "handoff" &&
@@ -250,7 +278,7 @@ export function createSharedMemoryStore(options = {}) {
 
     getLastContext({ agent, namespace } = {}) {
       const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       const data = update(currentData => null) ?? load()
       return data.contexts.find(context =>
         context.type === "context" &&
@@ -260,7 +288,7 @@ export function createSharedMemoryStore(options = {}) {
     },
 
     saveMemory(input) {
-      const safeInput = sanitizeStructuredMemoryInput(input)
+      const safeInput = sanitizeStructuredMemoryInput({ ...input, namespace: resolveNamespace(input.namespace) })
       return update(data => {
         const entry = {
           id: randomUUID(),
@@ -268,7 +296,7 @@ export function createSharedMemoryStore(options = {}) {
           namespace: safeInput.namespace,
           kind: safeInput.kind,
           title: safeInput.title,
-          content: safeInput.content,
+          content: redactContent(safeInput.content),
           tags: safeInput.tags,
           timestamp: new Date().toISOString(),
           type: "context"
@@ -285,7 +313,7 @@ export function createSharedMemoryStore(options = {}) {
 
     createSnapshot({ namespace, agent, title, content }) {
       const safeInput = sanitizeStructuredMemoryInput({
-        namespace,
+        namespace: resolveNamespace(namespace),
         agent,
         kind: "snapshot",
         title,
@@ -299,7 +327,7 @@ export function createSharedMemoryStore(options = {}) {
           namespace: safeInput.namespace,
           kind: "snapshot",
           title: safeInput.title,
-          content: safeInput.content,
+          content: redactContent(safeInput.content),
           tags: safeInput.tags,
           timestamp: new Date().toISOString(),
           type: "context"
@@ -310,7 +338,7 @@ export function createSharedMemoryStore(options = {}) {
     },
 
     getProjectBrief({ namespace, limit = 10 } = {}) {
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       const safeLimit = normalizeLimit(limit)
       const data = update(currentData => null) ?? load()
       const snapshot = data.contexts.find(context =>
@@ -341,7 +369,7 @@ export function createSharedMemoryStore(options = {}) {
 
     listContexts({ namespace, agent, tags = [], type, kind, limit = 10 } = {}) {
       const safeLimit = normalizeLimit(limit)
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
       const safeTags = sanitizeTags(tags)
       const data = update(currentData => null) ?? load()
@@ -356,7 +384,7 @@ export function createSharedMemoryStore(options = {}) {
 
     searchMemory({ namespace, query, agent, tags = [], type, kind, handoffStatus = "all", limit = 10 } = {}) {
       const safeLimit = normalizeLimit(limit)
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       const safeQuery = query ? sanitizeText(query, "query", INPUT_LIMITS.content) : undefined
       const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
       const safeTags = sanitizeTags(tags)
@@ -374,7 +402,7 @@ export function createSharedMemoryStore(options = {}) {
 
     listHandoffs({ namespace, agent, status = "all", limit = 10 } = {}) {
       const safeLimit = normalizeLimit(limit)
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
       const data = update(currentData => null) ?? load()
       return data.contexts.filter(context =>
@@ -387,7 +415,7 @@ export function createSharedMemoryStore(options = {}) {
 
     peekHandoff({ agent, namespace }) {
       const safeAgent = sanitizeText(agent, "agent", INPUT_LIMITS.agent)
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       const data = update(currentData => null) ?? load()
       return data.contexts.find(context =>
         context.type === "handoff" &&
@@ -399,7 +427,7 @@ export function createSharedMemoryStore(options = {}) {
 
     ackHandoff({ id, namespace }) {
       const safeId = sanitizeText(id, "id", INPUT_LIMITS.content)
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       return update(data => {
         const entry = data.contexts.find(context =>
           context.type === "handoff" &&
@@ -418,7 +446,7 @@ export function createSharedMemoryStore(options = {}) {
 
     reopenHandoff({ id, namespace }) {
       const safeId = sanitizeText(id, "id", INPUT_LIMITS.content)
-      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeNamespace = resolveNamespace(namespace)
       return update(data => {
         const entry = data.contexts.find(context =>
           context.type === "handoff" &&
@@ -429,6 +457,37 @@ export function createSharedMemoryStore(options = {}) {
         entry.read = false
         delete entry.readAt
         return entry
+      })
+    },
+
+    exportData() {
+      return update(currentData => currentData)
+    },
+
+    importData(importedData) {
+      const incoming = normalizeData(Array.isArray(importedData) ? { contexts: importedData } : importedData)
+      return update(data => {
+        const backupFile = backupStorage()
+        data.contexts = [...incoming.contexts, ...data.contexts]
+        return { imported: incoming.contexts.length, backupFile }
+      })
+    },
+
+    prune({ keep = 0 } = {}) {
+      const safeKeep = Number.isFinite(keep) && keep >= 0 ? keep : 0
+      return update(data => {
+        const backupFile = backupStorage()
+        const originalContexts = data.contexts
+        const kept = []
+        for (const context of originalContexts) {
+          if (context.type === "handoff" && context.read === false) kept.push(context)
+        }
+        for (const context of originalContexts) {
+          if (kept.length >= safeKeep) break
+          if (!kept.includes(context)) kept.push(context)
+        }
+        data.contexts = kept
+        return { pruned: Math.max(0, originalContexts.length - kept.length), backupFile }
       })
     }
   }
