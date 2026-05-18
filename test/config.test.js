@@ -14,7 +14,10 @@ test("getRuntimeConfig reads values from an env file and explicit env wins", asy
       "SHARED_MEMORY_MCP_STORAGE_FILE=/tmp/from-env-file.json",
       "SHARED_MEMORY_MCP_MAX_ITEMS=75",
       "SHARED_MEMORY_MCP_READ_HANDOFF_TTL_DAYS=3",
-      "SHARED_MEMORY_MCP_DELETE_READ_HANDOFFS=true"
+      "SHARED_MEMORY_MCP_DELETE_READ_HANDOFFS=true",
+      "SHARED_MEMORY_MCP_REDACT_SECRETS=true",
+      "SHARED_MEMORY_MCP_BACKUP_DIR=/tmp/shared-memory-backups",
+      "SHARED_MEMORY_MCP_DEFAULT_NAMESPACE=project-alpha"
     ].join("\n"))
 
     const config = getRuntimeConfig({
@@ -26,6 +29,9 @@ test("getRuntimeConfig reads values from an env file and explicit env wins", asy
     assert.equal(config.maxItems, 12)
     assert.equal(config.readHandoffTtlDays, 3)
     assert.equal(config.deleteReadHandoffs, true)
+    assert.equal(config.redactSecrets, true)
+    assert.equal(config.backupDir, "/tmp/shared-memory-backups")
+    assert.equal(config.defaultNamespace, "project-alpha")
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -46,6 +52,9 @@ test("createEnvFile creates an example env file without overwriting existing val
     assert.match(env, /SHARED_MEMORY_MCP_MAX_ITEMS=99/)
     assert.match(env, /SHARED_MEMORY_MCP_READ_HANDOFF_TTL_DAYS=7/)
     assert.match(env, /SHARED_MEMORY_MCP_DELETE_READ_HANDOFFS=false/)
+    assert.match(env, /SHARED_MEMORY_MCP_REDACT_SECRETS=false/)
+    assert.match(env, /SHARED_MEMORY_MCP_BACKUP_DIR=/)
+    assert.match(env, /SHARED_MEMORY_MCP_DEFAULT_NAMESPACE=default/)
     assert.equal((env.match(/SHARED_MEMORY_MCP_MAX_ITEMS=/g) || []).length, 1)
   } finally {
     await rm(dir, { recursive: true, force: true })

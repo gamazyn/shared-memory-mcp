@@ -386,6 +386,28 @@ test("retention keeps pending handoffs before snapshots and structured notes", a
   }
 })
 
+test("store redacts common secrets when configured", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({
+      storageFile: join(dir, "contexts.json"),
+      redactSecrets: true
+    })
+
+    const saved = store.saveContext({
+      agent: "agent-a",
+      title: "Secret note",
+      content: "Token is gho_abcdefghijklmnopqrstuvwxyz123456 and api_key=super-secret-value."
+    })
+
+    assert.doesNotMatch(saved.content, /gho_abcdefghijklmnopqrstuvwxyz123456/)
+    assert.doesNotMatch(saved.content, /super-secret-value/)
+    assert.match(saved.content, /\[REDACTED/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 async function writeJson(filePath, data) {
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(data, null, 2))
