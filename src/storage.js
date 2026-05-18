@@ -16,11 +16,19 @@ import {
   DEFAULT_READ_HANDOFF_TTL_DAYS,
   DEFAULT_STORAGE_FILE
 } from "./config.js"
-import { sanitizeContextInput, sanitizeHandoffInput, sanitizeText, INPUT_LIMITS } from "./sanitize.js"
+import {
+  sanitizeContextInput,
+  sanitizeHandoffInput,
+  sanitizeOptionalNamespace,
+  sanitizeTags,
+  sanitizeText,
+  INPUT_LIMITS
+} from "./sanitize.js"
 
 const LOCK_RETRY_MS = 20
 const LOCK_TIMEOUT_MS = 5000
 const LOCK_STALE_MS = 30000
+const DEFAULT_NAMESPACE = "default"
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
@@ -28,7 +36,47 @@ function sleep(ms) {
 
 function normalizeData(data) {
   if (!data || !Array.isArray(data.contexts)) return { contexts: [] }
+  for (const context of data.contexts) {
+    context.namespace ??= DEFAULT_NAMESPACE
+  }
   return data
+}
+
+function normalizeLimit(limit) {
+  return Number.isFinite(limit) && limit > 0 ? limit : 10
+}
+
+function contextNamespace(context) {
+  return context.namespace ?? DEFAULT_NAMESPACE
+}
+
+function matchesNamespace(context, namespace) {
+  return contextNamespace(context) === namespace
+}
+
+function matchesTags(context, tags) {
+  if (!tags || tags.length === 0) return true
+  const existing = new Set(context.tags ?? [])
+  return tags.every(tag => existing.has(tag))
+}
+
+function matchesQuery(context, query) {
+  if (!query) return true
+  const haystack = [
+    context.title,
+    context.content,
+    context.agent,
+    context.to,
+    ...(context.tags ?? [])
+  ].filter(Boolean).join("\n").toLowerCase()
+  return haystack.includes(query.toLowerCase())
+}
+
+function matchesHandoffStatus(context, status) {
+  if (!status || status === "all") return true
+  if (status === "pending") return context.read === false
+  if (status === "read") return context.read === true
+  return true
 }
 
 function limitContexts(contexts, maxItems) {
@@ -130,12 +178,13 @@ export function createSharedMemoryStore(options = {}) {
   }
 
   return {
-    saveContext({ agent, title, content, tags = [] }) {
-      const input = sanitizeContextInput({ agent, title, content, tags })
+    saveContext({ agent, namespace, title, content, tags = [] }) {
+      const input = sanitizeContextInput({ agent, namespace, title, content, tags })
       return update(data => {
         const entry = {
           id: randomUUID(),
           agent: input.agent,
+          namespace: input.namespace,
           title: input.title,
           content: input.content,
           tags: input.tags,
@@ -147,12 +196,13 @@ export function createSharedMemoryStore(options = {}) {
       })
     },
 
-    createHandoff({ to, summary, context }) {
-      const input = sanitizeHandoffInput({ to, summary, context })
+    createHandoff({ namespace, to, summary, context }) {
+      const input = sanitizeHandoffInput({ namespace, to, summary, context })
       return update(data => {
         const entry = {
           id: randomUUID(),
           agent: "handoff",
+          namespace: input.namespace,
           to: input.to,
           title: `Handoff to ${input.to}`,
           content: `## Summary\n${input.summary}\n\n## Full Context\n${input.context}`,
@@ -166,11 +216,15 @@ export function createSharedMemoryStore(options = {}) {
       })
     },
 
-    readHandoff({ agent }) {
+    readHandoff({ agent, namespace }) {
       const safeAgent = sanitizeText(agent, "agent", INPUT_LIMITS.agent)
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
       return update(data => {
         const entry = data.contexts.find(context =>
-          context.type === "handoff" && context.to === safeAgent && !context.read
+          context.type === "handoff" &&
+          matchesNamespace(context, safeNamespace) &&
+          context.to === safeAgent &&
+          !context.read
         )
         if (!entry) return null
         entry.read = true
@@ -182,18 +236,106 @@ export function createSharedMemoryStore(options = {}) {
       })
     },
 
-    getLastContext({ agent } = {}) {
+    getLastContext({ agent, namespace } = {}) {
       const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
       const data = update(currentData => null) ?? load()
       return data.contexts.find(context =>
-        context.type === "context" && (safeAgent ? context.agent === safeAgent : true)
+        context.type === "context" &&
+        matchesNamespace(context, safeNamespace) &&
+        (safeAgent ? context.agent === safeAgent : true)
       ) ?? null
     },
 
-    listContexts({ limit = 10 } = {}) {
-      const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 10
+    listContexts({ namespace, agent, tags = [], type, limit = 10 } = {}) {
+      const safeLimit = normalizeLimit(limit)
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
+      const safeTags = sanitizeTags(tags)
       const data = update(currentData => null) ?? load()
-      return data.contexts.slice(0, safeLimit)
+      return data.contexts.filter(context =>
+        matchesNamespace(context, safeNamespace) &&
+        (safeAgent ? context.agent === safeAgent : true) &&
+        (type ? context.type === type : true) &&
+        matchesTags(context, safeTags)
+      ).slice(0, safeLimit)
+    },
+
+    searchMemory({ namespace, query, agent, tags = [], type, handoffStatus = "all", limit = 10 } = {}) {
+      const safeLimit = normalizeLimit(limit)
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeQuery = query ? sanitizeText(query, "query", INPUT_LIMITS.content) : undefined
+      const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
+      const safeTags = sanitizeTags(tags)
+      const data = update(currentData => null) ?? load()
+      return data.contexts.filter(context =>
+        matchesNamespace(context, safeNamespace) &&
+        (safeAgent ? context.agent === safeAgent : true) &&
+        (type ? context.type === type : true) &&
+        matchesTags(context, safeTags) &&
+        matchesQuery(context, safeQuery) &&
+        (context.type === "handoff" ? matchesHandoffStatus(context, handoffStatus) : true)
+      ).slice(0, safeLimit)
+    },
+
+    listHandoffs({ namespace, agent, status = "all", limit = 10 } = {}) {
+      const safeLimit = normalizeLimit(limit)
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
+      const data = update(currentData => null) ?? load()
+      return data.contexts.filter(context =>
+        context.type === "handoff" &&
+        matchesNamespace(context, safeNamespace) &&
+        (safeAgent ? context.to === safeAgent : true) &&
+        matchesHandoffStatus(context, status)
+      ).slice(0, safeLimit)
+    },
+
+    peekHandoff({ agent, namespace }) {
+      const safeAgent = sanitizeText(agent, "agent", INPUT_LIMITS.agent)
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const data = update(currentData => null) ?? load()
+      return data.contexts.find(context =>
+        context.type === "handoff" &&
+        matchesNamespace(context, safeNamespace) &&
+        context.to === safeAgent &&
+        !context.read
+      ) ?? null
+    },
+
+    ackHandoff({ id, namespace }) {
+      const safeId = sanitizeText(id, "id", INPUT_LIMITS.content)
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      return update(data => {
+        const entry = data.contexts.find(context =>
+          context.type === "handoff" &&
+          matchesNamespace(context, safeNamespace) &&
+          context.id === safeId
+        )
+        if (!entry) return null
+        entry.read = true
+        entry.readAt = new Date().toISOString()
+        if (cleanupOptions.deleteReadHandoffs) {
+          data.contexts = data.contexts.filter(context => context.id !== entry.id)
+        }
+        return entry
+      })
+    },
+
+    reopenHandoff({ id, namespace }) {
+      const safeId = sanitizeText(id, "id", INPUT_LIMITS.content)
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      return update(data => {
+        const entry = data.contexts.find(context =>
+          context.type === "handoff" &&
+          matchesNamespace(context, safeNamespace) &&
+          context.id === safeId
+        )
+        if (!entry) return null
+        entry.read = false
+        delete entry.readAt
+        return entry
+      })
     }
   }
 }
