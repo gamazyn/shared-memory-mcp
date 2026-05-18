@@ -20,6 +20,7 @@ import {
   sanitizeContextInput,
   sanitizeHandoffInput,
   sanitizeOptionalNamespace,
+  sanitizeStructuredMemoryInput,
   sanitizeTags,
   sanitizeText,
   INPUT_LIMITS
@@ -38,6 +39,7 @@ function normalizeData(data) {
   if (!data || !Array.isArray(data.contexts)) return { contexts: [] }
   for (const context of data.contexts) {
     context.namespace ??= DEFAULT_NAMESPACE
+    context.kind ??= context.type === "handoff" ? "handoff" : "note"
   }
   return data
 }
@@ -77,6 +79,14 @@ function matchesHandoffStatus(context, status) {
   if (status === "pending") return context.read === false
   if (status === "read") return context.read === true
   return true
+}
+
+function matchesKind(context, kind) {
+  return kind ? context.kind === kind : true
+}
+
+function formatBriefItem(context) {
+  return `- [${context.kind ?? context.type}] ${context.title} (${context.agent}): ${context.content}`
 }
 
 function limitContexts(contexts, maxItems) {
@@ -185,6 +195,7 @@ export function createSharedMemoryStore(options = {}) {
           id: randomUUID(),
           agent: input.agent,
           namespace: input.namespace,
+          kind: input.kind,
           title: input.title,
           content: input.content,
           tags: input.tags,
@@ -203,6 +214,7 @@ export function createSharedMemoryStore(options = {}) {
           id: randomUUID(),
           agent: "handoff",
           namespace: input.namespace,
+          kind: input.kind,
           to: input.to,
           title: `Handoff to ${input.to}`,
           content: `## Summary\n${input.summary}\n\n## Full Context\n${input.context}`,
@@ -247,7 +259,87 @@ export function createSharedMemoryStore(options = {}) {
       ) ?? null
     },
 
-    listContexts({ namespace, agent, tags = [], type, limit = 10 } = {}) {
+    saveMemory(input) {
+      const safeInput = sanitizeStructuredMemoryInput(input)
+      return update(data => {
+        const entry = {
+          id: randomUUID(),
+          agent: safeInput.agent,
+          namespace: safeInput.namespace,
+          kind: safeInput.kind,
+          title: safeInput.title,
+          content: safeInput.content,
+          tags: safeInput.tags,
+          timestamp: new Date().toISOString(),
+          type: "context"
+        }
+        if (safeInput.status) entry.status = safeInput.status
+        if (safeInput.relatedFiles.length > 0) entry.relatedFiles = safeInput.relatedFiles
+        if (safeInput.branch) entry.branch = safeInput.branch
+        if (safeInput.commit) entry.commit = safeInput.commit
+        if (safeInput.nextAction) entry.nextAction = safeInput.nextAction
+        data.contexts.unshift(entry)
+        return entry
+      })
+    },
+
+    createSnapshot({ namespace, agent, title, content }) {
+      const safeInput = sanitizeStructuredMemoryInput({
+        namespace,
+        agent,
+        kind: "snapshot",
+        title,
+        content,
+        tags: ["snapshot"]
+      })
+      return update(data => {
+        const entry = {
+          id: randomUUID(),
+          agent: safeInput.agent,
+          namespace: safeInput.namespace,
+          kind: "snapshot",
+          title: safeInput.title,
+          content: safeInput.content,
+          tags: safeInput.tags,
+          timestamp: new Date().toISOString(),
+          type: "context"
+        }
+        data.contexts.unshift(entry)
+        return entry
+      })
+    },
+
+    getProjectBrief({ namespace, limit = 10 } = {}) {
+      const safeNamespace = sanitizeOptionalNamespace(namespace)
+      const safeLimit = normalizeLimit(limit)
+      const data = update(currentData => null) ?? load()
+      const snapshot = data.contexts.find(context =>
+        matchesNamespace(context, safeNamespace) &&
+        context.type === "context" &&
+        context.kind === "snapshot"
+      )
+      if (snapshot) return snapshot
+
+      const items = data.contexts.filter(context =>
+        matchesNamespace(context, safeNamespace) &&
+        context.type === "context"
+      ).slice(0, safeLimit)
+      return {
+        id: `brief-${safeNamespace}`,
+        agent: "shared-memory",
+        namespace: safeNamespace,
+        kind: "snapshot",
+        title: `Project brief for ${safeNamespace}`,
+        content: items.length > 0
+          ? items.map(formatBriefItem).join("\n")
+          : `No saved memory found for namespace: ${safeNamespace}`,
+        tags: ["snapshot"],
+        timestamp: new Date().toISOString(),
+        type: "context"
+      }
+    },
+
+    listContexts({ namespace, agent, tags = [], type, kind, limit = 10 } = {}) {
       const safeLimit = normalizeLimit(limit)
       const safeNamespace = sanitizeOptionalNamespace(namespace)
       const safeAgent = agent ? sanitizeText(agent, "agent", INPUT_LIMITS.agent) : undefined
@@ -257,11 +349,12 @@ export function createSharedMemoryStore(options = {}) {
         matchesNamespace(context, safeNamespace) &&
         (safeAgent ? context.agent === safeAgent : true) &&
         (type ? context.type === type : true) &&
+        matchesKind(context, kind) &&
         matchesTags(context, safeTags)
       ).slice(0, safeLimit)
     },
 
-    searchMemory({ namespace, query, agent, tags = [], type, handoffStatus = "all", limit = 10 } = {}) {
+    searchMemory({ namespace, query, agent, tags = [], type, kind, handoffStatus = "all", limit = 10 } = {}) {
       const safeLimit = normalizeLimit(limit)
       const safeNamespace = sanitizeOptionalNamespace(namespace)
       const safeQuery = query ? sanitizeText(query, "query", INPUT_LIMITS.content) : undefined
@@ -272,6 +365,7 @@ export function createSharedMemoryStore(options = {}) {
         matchesNamespace(context, safeNamespace) &&
         (safeAgent ? context.agent === safeAgent : true) &&
         (type ? context.type === type : true) &&
+        matchesKind(context, kind) &&
         matchesTags(context, safeTags) &&
         matchesQuery(context, safeQuery) &&
         (context.type === "handoff" ? matchesHandoffStatus(context, handoffStatus) : true)

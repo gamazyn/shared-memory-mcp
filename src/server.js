@@ -5,6 +5,8 @@ import { z } from "zod"
 import { getRuntimeConfig } from "./config.js"
 import { createSharedMemoryStore } from "./storage.js"
 
+const MEMORY_KINDS = ["note", "decision", "assumption", "task", "risk", "handoff", "snapshot"]
+
 function formatTimestamp(timestamp) {
   return new Date(timestamp).toLocaleString()
 }
@@ -13,7 +15,8 @@ function formatContextEntry(entry, index) {
   const destination = entry.to ? ` -> ${entry.to}` : ""
   const pending = entry.read === false ? " [PENDING]" : ""
   const namespace = entry.namespace ? ` (${entry.namespace})` : ""
-  return `${index + 1}. [${entry.type}${destination}${pending}]${namespace} ${entry.title} - ${entry.agent} - ${formatTimestamp(entry.timestamp)}`
+  const kind = entry.kind ? `/${entry.kind}` : ""
+  return `${index + 1}. [${entry.type}${kind}${destination}${pending}]${namespace} ${entry.title} - ${entry.agent} - ${formatTimestamp(entry.timestamp)}`
 }
 
 export function createServer(options = {}) {
@@ -34,6 +37,28 @@ export function createServer(options = {}) {
     async ({ agent, namespace, title, content, tags }) => {
       const entry = store.saveContext({ agent, namespace, title, content, tags: tags ?? [] })
       return { content: [{ type: "text", text: `Context saved with ID: ${entry.id}` }] }
+    }
+  )
+
+  server.tool(
+    "save_memory",
+    "Save structured memory with a kind and optional workflow metadata.",
+    {
+      agent: z.string().min(1).describe("Agent saving the memory"),
+      namespace: z.string().optional().describe("Optional project or workspace namespace, default: default"),
+      kind: z.enum(MEMORY_KINDS).describe("Structured memory kind"),
+      title: z.string().min(1).describe("Short descriptive title"),
+      content: z.string().min(1).describe("Full memory content"),
+      status: z.string().optional().describe("Optional status, for example: open, accepted, done"),
+      relatedFiles: z.array(z.string()).optional().describe("Optional related file paths"),
+      branch: z.string().optional().describe("Optional related branch name"),
+      commit: z.string().optional().describe("Optional related commit SHA"),
+      nextAction: z.string().optional().describe("Optional next action"),
+      tags: z.array(z.string()).optional().describe("Optional categorization tags")
+    },
+    async input => {
+      const entry = store.saveMemory({ ...input, tags: input.tags ?? [], relatedFiles: input.relatedFiles ?? [] })
+      return { content: [{ type: "text", text: `Memory saved with ID: ${entry.id}` }] }
     }
   )
 
@@ -93,10 +118,11 @@ export function createServer(options = {}) {
       agent: z.string().optional().describe("Optional agent filter"),
       tags: z.array(z.string()).optional().describe("Optional tag filters; all tags must match"),
       type: z.enum(["context", "handoff"]).optional().describe("Optional item type filter"),
+      kind: z.enum(MEMORY_KINDS).optional().describe("Optional structured memory kind filter"),
       limit: z.number().optional().describe("Maximum number of items to list, default: 10")
     },
-    async ({ namespace, agent, tags, type, limit }) => {
-      const items = store.listContexts({ namespace, agent, tags: tags ?? [], type, limit: limit ?? 10 })
+    async ({ namespace, agent, tags, type, kind, limit }) => {
+      const items = store.listContexts({ namespace, agent, tags: tags ?? [], type, kind, limit: limit ?? 10 })
       if (items.length === 0) return { content: [{ type: "text", text: "No saved context yet." }] }
 
       const text = items.map(formatContextEntry).join("\n")
@@ -113,16 +139,18 @@ export function createServer(options = {}) {
       agent: z.string().optional().describe("Optional source agent filter"),
       tags: z.array(z.string()).optional().describe("Optional tag filters; all tags must match"),
       type: z.enum(["context", "handoff"]).optional().describe("Optional item type filter"),
+      kind: z.enum(MEMORY_KINDS).optional().describe("Optional structured memory kind filter"),
       handoffStatus: z.enum(["all", "pending", "read"]).optional().describe("Optional status filter for handoffs"),
       limit: z.number().optional().describe("Maximum number of items to return, default: 10")
     },
-    async ({ namespace, query, agent, tags, type, handoffStatus, limit }) => {
+    async ({ namespace, query, agent, tags, type, kind, handoffStatus, limit }) => {
       const items = store.searchMemory({
         namespace,
         query,
         agent,
         tags: tags ?? [],
         type,
+        kind,
         handoffStatus: handoffStatus ?? "all",
         limit: limit ?? 10
       })
@@ -130,6 +158,39 @@ export function createServer(options = {}) {
 
       const text = items.map(formatContextEntry).join("\n")
       return { content: [{ type: "text", text }] }
+    }
+  )
+
+  server.tool(
+    "create_snapshot",
+    "Save a durable snapshot summary for a namespace.",
+    {
+      namespace: z.string().optional().describe("Optional project or workspace namespace, default: default"),
+      agent: z.string().min(1).describe("Agent creating the snapshot"),
+      title: z.string().min(1).describe("Snapshot title"),
+      content: z.string().min(1).describe("Snapshot summary content")
+    },
+    async ({ namespace, agent, title, content }) => {
+      const entry = store.createSnapshot({ namespace, agent, title, content })
+      return { content: [{ type: "text", text: `Snapshot created with ID: ${entry.id}` }] }
+    }
+  )
+
+  server.tool(
+    "get_project_brief",
+    "Read the latest snapshot for a namespace, or a generated brief from recent memory.",
+    {
+      namespace: z.string().optional().describe("Optional project or workspace namespace, default: default"),
+      limit: z.number().optional().describe("Maximum number of recent items to include when no snapshot exists")
+    },
+    async ({ namespace, limit }) => {
+      const entry = store.getProjectBrief({ namespace, limit: limit ?? 10 })
+      return {
+        content: [{
+          type: "text",
+          text: `**${entry.title}** - ${entry.namespace} - ${formatTimestamp(entry.timestamp)}\n\n${entry.content}`
+        }]
+      }
     }
   )
 

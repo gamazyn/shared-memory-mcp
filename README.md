@@ -9,6 +9,8 @@ The server stores small pieces of local context in a JSON file and exposes MCP t
 - Save reusable context with agent name, title, content, and tags.
 - Separate memory by namespace or workspace.
 - Search saved memory by text, agent, tag, type, and handoff status.
+- Save structured memory as notes, decisions, assumptions, tasks, risks, handoffs, and snapshots.
+- Create namespace snapshots and retrieve project briefs.
 - Create structured handoffs for another agent.
 - Read, peek, acknowledge, reopen, and list handoffs.
 - List recent contexts and handoffs.
@@ -21,7 +23,10 @@ The server stores small pieces of local context in a JSON file and exposes MCP t
 | Tool | Purpose |
 | --- | --- |
 | `save_context` | Save free-form context for later use. |
+| `save_memory` | Save structured memory with kind and optional workflow metadata. |
 | `create_handoff` | Create a structured handoff for another agent. |
+| `create_snapshot` | Save a durable namespace summary. |
+| `get_project_brief` | Read the latest snapshot, or a generated brief from recent memory. |
 | `read_handoff` | Read a pending handoff for this agent and mark it as read. |
 | `peek_handoff` | Read a pending handoff without marking it as read. |
 | `ack_handoff` | Mark a handoff as read by ID. |
@@ -34,6 +39,16 @@ The server stores small pieces of local context in a JSON file and exposes MCP t
 Tool names and input fields are English so the server can be used across projects, clients, and agent teams.
 
 Most tools accept an optional `namespace` field. If omitted, the server uses `default`. Older storage files without a namespace are treated as `default`.
+
+Structured memory supports these `kind` values:
+
+- `note`
+- `decision`
+- `assumption`
+- `task`
+- `risk`
+- `handoff`
+- `snapshot`
 
 ## Install From This Repository
 

@@ -259,6 +259,133 @@ test("store supports handoff peek, ack, reopen, and status filtering", async () 
   }
 })
 
+test("store saves structured memory and filters by kind", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({ storageFile: join(dir, "contexts.json") })
+    const note = store.saveContext({
+      namespace: "project-alpha",
+      agent: "planner",
+      title: "Plain note",
+      content: "This remains compatible."
+    })
+    const decision = store.saveMemory({
+      namespace: "project-alpha",
+      agent: "planner",
+      kind: "decision",
+      title: "Storage choice",
+      content: "Keep local JSON storage for v1.",
+      status: "accepted",
+      relatedFiles: ["src/storage.js"],
+      branch: "feat/phase-2-structured-memory",
+      commit: "abc123",
+      nextAction: "Document the decision.",
+      tags: ["architecture"]
+    })
+
+    const decisions = store.searchMemory({ namespace: "project-alpha", kind: "decision", limit: 10 })
+
+    assert.equal(note.kind, "note")
+    assert.equal(decision.kind, "decision")
+    assert.equal(decision.status, "accepted")
+    assert.deepEqual(decision.relatedFiles, ["src/storage.js"])
+    assert.equal(decisions.length, 1)
+    assert.equal(decisions[0].title, "Storage choice")
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store creates snapshots and returns the latest snapshot as project brief", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({ storageFile: join(dir, "contexts.json") })
+    store.saveMemory({
+      namespace: "project-alpha",
+      agent: "planner",
+      kind: "decision",
+      title: "Search API",
+      content: "Add text and metadata filters."
+    })
+    const snapshot = store.createSnapshot({
+      namespace: "project-alpha",
+      agent: "planner",
+      title: "Project Alpha Brief",
+      content: "Latest state: search API is ready for implementation."
+    })
+
+    const brief = store.getProjectBrief({ namespace: "project-alpha" })
+
+    assert.equal(snapshot.kind, "snapshot")
+    assert.equal(brief.id, snapshot.id)
+    assert.match(brief.content, /search API is ready/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store builds a project brief from recent memory when no snapshot exists", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({ storageFile: join(dir, "contexts.json") })
+    store.saveMemory({
+      namespace: "project-alpha",
+      agent: "planner",
+      kind: "decision",
+      title: "Use JSON",
+      content: "Keep storage local."
+    })
+    store.saveMemory({
+      namespace: "project-alpha",
+      agent: "reviewer",
+      kind: "risk",
+      title: "Retention risk",
+      content: "Pending handoffs must survive pruning."
+    })
+
+    const brief = store.getProjectBrief({ namespace: "project-alpha" })
+
+    assert.equal(brief.kind, "snapshot")
+    assert.match(brief.content, /Retention risk/)
+    assert.match(brief.content, /Use JSON/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("retention keeps pending handoffs before snapshots and structured notes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({ storageFile: join(dir, "contexts.json"), maxItems: 2 })
+    const handoff = store.createHandoff({
+      namespace: "project-alpha",
+      to: "implementer",
+      summary: "Pending work",
+      context: "Keep this handoff."
+    })
+    store.createSnapshot({
+      namespace: "project-alpha",
+      agent: "planner",
+      title: "Snapshot",
+      content: "Snapshot content."
+    })
+    store.saveMemory({
+      namespace: "project-alpha",
+      agent: "planner",
+      kind: "note",
+      title: "Recent note",
+      content: "Recent note content."
+    })
+
+    const items = store.listContexts({ namespace: "project-alpha", limit: 10 })
+
+    assert.equal(items.length, 2)
+    assert.equal(items.some(item => item.id === handoff.id && item.read === false), true)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 async function writeJson(filePath, data) {
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, JSON.stringify(data, null, 2))
