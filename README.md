@@ -52,6 +52,24 @@ Structured memory supports these `kind` values:
 - `handoff`
 - `snapshot`
 
+## Resources And Prompts
+
+The server also exposes read-only MCP resources:
+
+| Resource | Purpose |
+| --- | --- |
+| `memory://recent` | Recent memory from the default namespace. |
+| `memory://namespace/{namespace}/brief` | Latest snapshot or generated brief for a namespace. |
+| `memory://handoffs/{agent}` | Handoffs for an agent in the default namespace. |
+
+Prompts:
+
+| Prompt | Purpose |
+| --- | --- |
+| `load_project_memory` | Load shared memory before starting work. |
+| `prepare_handoff` | Draft a complete handoff for another agent. |
+| `summarize_decisions` | Summarize saved decisions and conflicts. |
+
 ## Install From This Repository
 
 ```bash

@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 
@@ -19,10 +19,123 @@ function formatContextEntry(entry, index) {
   return `${index + 1}. [${entry.type}${kind}${destination}${pending}]${namespace} ${entry.title} - ${entry.agent} - ${formatTimestamp(entry.timestamp)}`
 }
 
+function promptMessage(text) {
+  return {
+    messages: [{
+      role: "user",
+      content: { type: "text", text }
+    }]
+  }
+}
+
 export function createServer(options = {}) {
   const config = options.config ?? getRuntimeConfig()
   const store = options.store ?? createSharedMemoryStore(config)
   const server = new McpServer({ name: "shared-memory", version: "1.0.0" })
+
+  server.registerResource(
+    "recent-memory",
+    "memory://recent",
+    {
+      title: "Recent Memory",
+      description: "Recent contexts and handoffs from the default namespace.",
+      mimeType: "text/plain"
+    },
+    async () => {
+      const items = store.listContexts({ limit: 10 })
+      return {
+        contents: [{
+          uri: "memory://recent",
+          mimeType: "text/plain",
+          text: items.length ? items.map(formatContextEntry).join("\n") : "No saved context yet."
+        }]
+      }
+    }
+  )
+
+  server.registerResource(
+    "namespace-brief",
+    new ResourceTemplate("memory://namespace/{namespace}/brief", { list: undefined }),
+    {
+      title: "Namespace Brief",
+      description: "Latest snapshot or generated brief for a namespace.",
+      mimeType: "text/plain"
+    },
+    async (uri, variables) => {
+      const namespace = variables.namespace
+      const brief = store.getProjectBrief({ namespace })
+      return {
+        contents: [{
+          uri: uri.href,
+          mimeType: "text/plain",
+          text: `**${brief.title}**\n\n${brief.content}`
+        }]
+      }
+    }
+  )
+
+  server.registerResource(
+    "agent-handoffs",
+    new ResourceTemplate("memory://handoffs/{agent}", { list: undefined }),
+    {
+      title: "Agent Handoffs",
+      description: "Pending and read handoffs for an agent in the default namespace.",
+      mimeType: "text/plain"
+    },
+    async (uri, variables) => {
+      const items = store.listHandoffs({ agent: variables.agent, status: "all", limit: 20 })
+      return {
+        contents: [{
+          uri: uri.href,
+          mimeType: "text/plain",
+          text: items.length ? items.map(formatContextEntry).join("\n") : "No handoffs found."
+        }]
+      }
+    }
+  )
+
+  server.registerPrompt(
+    "prepare_handoff",
+    {
+      title: "Prepare Handoff",
+      description: "Draft a complete handoff for another agent.",
+      argsSchema: {
+        to: z.string().describe("Destination agent name"),
+        namespace: z.string().optional().describe("Project namespace")
+      }
+    },
+    async ({ to, namespace }) => promptMessage(
+      `Prepare a concise but complete handoff for ${to}${namespace ? ` in namespace ${namespace}` : ""}. Include summary, current state, files or decisions that matter, risks, and the exact next action.`
+    )
+  )
+
+  server.registerPrompt(
+    "load_project_memory",
+    {
+      title: "Load Project Memory",
+      description: "Load the relevant shared memory before starting work.",
+      argsSchema: {
+        namespace: z.string().optional().describe("Project namespace")
+      }
+    },
+    async ({ namespace }) => promptMessage(
+      `Load shared memory${namespace ? ` for namespace ${namespace}` : ""}. Read the project brief, recent memory, and pending handoffs before making changes.`
+    )
+  )
+
+  server.registerPrompt(
+    "summarize_decisions",
+    {
+      title: "Summarize Decisions",
+      description: "Summarize saved decisions in shared memory.",
+      argsSchema: {
+        namespace: z.string().optional().describe("Project namespace")
+      }
+    },
+    async ({ namespace }) => promptMessage(
+      `Summarize the important decisions${namespace ? ` in namespace ${namespace}` : ""}. Group them by topic, include the rationale, and identify any stale or conflicting decisions.`
+    )
+  )
 
   server.tool(
     "save_context",
