@@ -128,7 +128,11 @@ test("read handoffs older than TTL are cleaned automatically", async () => {
     })
 
     const store = createSharedMemoryStore({ storageFile, readHandoffTtlDays: 1 })
-    assert.equal(store.listContexts({ limit: 10 }).length, 0)
+    store.saveContext({ agent: "agent-a", title: "Fresh context", content: "Fresh content" })
+
+    const items = store.listContexts({ limit: 10 })
+    assert.equal(items.length, 1)
+    assert.equal(items[0].title, "Fresh context")
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -403,6 +407,217 @@ test("store redacts common secrets when configured", async () => {
     assert.doesNotMatch(saved.content, /gho_abcdefghijklmnopqrstuvwxyz123456/)
     assert.doesNotMatch(saved.content, /super-secret-value/)
     assert.match(saved.content, /\[REDACTED/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store redacts persisted title, content, tags, and handoff fields when configured", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({
+      storageFile: join(dir, "contexts.json"),
+      redactSecrets: true
+    })
+
+    const saved = store.saveContext({
+      agent: "agent-a token=agent-secret",
+      title: "api_key=title-secret",
+      content: "token=content-secret",
+      tags: ["secret=tag-secret"]
+    })
+    const handoff = store.createHandoff({
+      to: "agent-b token=to-secret",
+      summary: "api_key=summary-secret",
+      context: "token=context-secret"
+    })
+    const memory = store.saveMemory({
+      agent: "agent-c token=memory-agent-secret",
+      kind: "task",
+      title: "Task",
+      content: "Done",
+      status: "secret=status-secret",
+      relatedFiles: ["token=file-secret"],
+      branch: "secret=branch-secret",
+      commit: "token=commit-secret",
+      nextAction: "api_key=next-secret"
+    })
+
+    assert.doesNotMatch(saved.agent, /agent-secret/)
+    assert.doesNotMatch(saved.title, /title-secret/)
+    assert.doesNotMatch(saved.content, /content-secret/)
+    assert.doesNotMatch(saved.tags.join(" "), /tag-secret/)
+    assert.doesNotMatch(handoff.to, /to-secret/)
+    assert.doesNotMatch(handoff.title, /to-secret/)
+    assert.doesNotMatch(handoff.content, /summary-secret|context-secret/)
+    assert.doesNotMatch(JSON.stringify(memory), /memory-agent-secret|status-secret|file-secret|branch-secret|commit-secret|next-secret/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store redacts imported memory when configured", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const store = createSharedMemoryStore({
+      storageFile: join(dir, "contexts.json"),
+      redactSecrets: true
+    })
+
+    store.importData({
+      contexts: [{
+        id: "imported-secret",
+        agent: "importer",
+        namespace: "default",
+        kind: "note",
+        title: "api_key=title-secret",
+        content: "token=content-secret",
+        tags: ["secret=tag-secret"],
+        timestamp: new Date().toISOString(),
+        type: "context"
+      }]
+    })
+
+    const imported = store.listContexts({ limit: 1 })[0]
+
+    assert.doesNotMatch(imported.title, /title-secret/)
+    assert.doesNotMatch(imported.content, /content-secret/)
+    assert.doesNotMatch(imported.tags.join(" "), /tag-secret/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store rejects invalid imported entries before writing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const storageFile = join(dir, "contexts.json")
+    const store = createSharedMemoryStore({ storageFile })
+
+    assert.throws(() => {
+      store.importData({ contexts: [{ id: "bad" }] })
+    }, /must be a string/)
+    assert.throws(() => {
+      store.importData({ contexts: [null] })
+    }, /imported context must be an object/)
+    assert.throws(() => {
+      store.importData({
+        contexts: [{
+          id: "bad-namespace",
+          agent: "agent-a",
+          namespace: false,
+          kind: "note",
+          title: "Bad namespace",
+          content: "Bad content",
+          tags: [],
+          timestamp: new Date().toISOString(),
+          type: "context"
+        }]
+      })
+    }, /namespace must be a string/)
+    assert.throws(() => {
+      store.importData({
+        contexts: [{
+          id: "bad-status",
+          agent: "agent-a",
+          kind: "note",
+          title: "Bad status",
+          content: "Bad content",
+          status: false,
+          tags: [],
+          timestamp: new Date().toISOString(),
+          type: "context"
+        }]
+      })
+    }, /status must be a string/)
+
+    assert.equal(store.listContexts({ limit: 10 }).length, 0)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store export does not apply retention or mutate storage", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const storageFile = join(dir, "contexts.json")
+    await writeJson(storageFile, {
+      contexts: [
+        {
+          id: "older",
+          agent: "agent-a",
+          namespace: "default",
+          kind: "note",
+          title: "Older",
+          content: "Older content",
+          tags: [],
+          timestamp: new Date().toISOString(),
+          type: "context"
+        },
+        {
+          id: "newer",
+          agent: "agent-a",
+          namespace: "default",
+          kind: "note",
+          title: "Newer",
+          content: "Newer content",
+          tags: [],
+          timestamp: new Date().toISOString(),
+          type: "context"
+        }
+      ]
+    })
+    const store = createSharedMemoryStore({ storageFile, maxItems: 1 })
+
+    const exported = store.exportData()
+    const raw = JSON.parse(await readFile(storageFile, "utf8"))
+
+    assert.equal(exported.contexts.length, 2)
+    assert.equal(raw.contexts.length, 2)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("store read operations do not apply retention or mutate storage", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const storageFile = join(dir, "contexts.json")
+    await writeJson(storageFile, {
+      contexts: [
+        {
+          id: "older",
+          agent: "agent-a",
+          namespace: "default",
+          kind: "note",
+          title: "Older",
+          content: "Older content",
+          tags: [],
+          timestamp: new Date().toISOString(),
+          type: "context"
+        },
+        {
+          id: "newer",
+          agent: "agent-a",
+          namespace: "default",
+          kind: "note",
+          title: "Newer",
+          content: "Newer content",
+          tags: [],
+          timestamp: new Date().toISOString(),
+          type: "context"
+        }
+      ]
+    })
+    const store = createSharedMemoryStore({ storageFile, maxItems: 1 })
+
+    assert.equal(store.listContexts({ limit: 10 }).length, 2)
+    assert.equal(store.searchMemory({ query: "content", limit: 10 }).length, 2)
+    assert.match(store.getProjectBrief().content, /Older content/)
+    assert.equal(store.getLastContext().title, "Older")
+
+    const raw = JSON.parse(await readFile(storageFile, "utf8"))
+    assert.equal(raw.contexts.length, 2)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

@@ -33,11 +33,23 @@ child.stdin.write(`${JSON.stringify({
   jsonrpc: "2.0",
   id: 6,
   method: "resources/read",
-  params: { uri: "memory://namespace/smoke-namespace/brief" }
+  params: { uri: "memory://namespace/smoke-namespace/recent" }
 })}\n`)
 child.stdin.write(`${JSON.stringify({
   jsonrpc: "2.0",
   id: 7,
+  method: "resources/read",
+  params: { uri: "memory://namespace/smoke-namespace/brief" }
+})}\n`)
+child.stdin.write(`${JSON.stringify({
+  jsonrpc: "2.0",
+  id: 8,
+  method: "resources/read",
+  params: { uri: "memory://namespace/smoke-namespace/handoffs/smoke-agent" }
+})}\n`)
+child.stdin.write(`${JSON.stringify({
+  jsonrpc: "2.0",
+  id: 9,
   method: "prompts/get",
   params: { name: "load_project_memory", arguments: { namespace: "smoke-namespace" } }
 })}\n`)
@@ -51,8 +63,10 @@ const tools = responses.find(response => response.id === 2).result.tools.map(too
 const resources = responses.find(response => response.id === 3).result.resources.map(resource => resource.uri)
 const resourceTemplates = responses.find(response => response.id === 4).result.resourceTemplates.map(resource => resource.uriTemplate)
 const prompts = responses.find(response => response.id === 5).result.prompts.map(prompt => prompt.name)
-const namespaceBrief = responses.find(response => response.id === 6).result.contents[0].text
-const loadPrompt = responses.find(response => response.id === 7).result.messages[0].content.text
+const namespaceRecent = responses.find(response => response.id === 6).result.contents[0].text
+const namespaceBrief = responses.find(response => response.id === 7).result.contents[0].text
+const namespaceHandoffs = responses.find(response => response.id === 8).result.contents[0].text
+const loadPrompt = responses.find(response => response.id === 9).result.messages[0].content.text
 
 assert.deepEqual(tools.sort(), [
   "ack_handoff",
@@ -72,14 +86,18 @@ assert.deepEqual(tools.sort(), [
 assert.deepEqual(resources.sort(), ["memory://recent"].sort())
 assert.deepEqual(resourceTemplates.sort(), [
   "memory://handoffs/{agent}",
-  "memory://namespace/{namespace}/brief"
+  "memory://namespace/{namespace}/brief",
+  "memory://namespace/{namespace}/handoffs/{agent}",
+  "memory://namespace/{namespace}/recent"
 ].sort())
 assert.deepEqual(prompts.sort(), [
   "load_project_memory",
   "prepare_handoff",
   "summarize_decisions"
 ].sort())
+assert.match(namespaceRecent, /No saved context yet/)
 assert.match(namespaceBrief, /smoke-namespace/)
+assert.match(namespaceHandoffs, /No handoffs found/)
 assert.match(loadPrompt, /smoke-namespace/)
 
 console.log("smoke OK")

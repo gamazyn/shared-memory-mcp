@@ -60,7 +60,9 @@ The server also exposes read-only MCP resources:
 | --- | --- |
 | `memory://recent` | Recent memory from the default namespace. |
 | `memory://namespace/{namespace}/brief` | Latest snapshot or generated brief for a namespace. |
+| `memory://namespace/{namespace}/recent` | Recent memory for a namespace. |
 | `memory://handoffs/{agent}` | Handoffs for an agent in the default namespace. |
+| `memory://namespace/{namespace}/handoffs/{agent}` | Handoffs for an agent in a namespace. |
 
 Prompts:
 
@@ -148,6 +150,7 @@ shared-memory-mcp doctor
 ```
 
 The CLI uses the same environment variables as the MCP server.
+`doctor` reports storage paths and whether known Codex and Claude config files are present; it does not replace an end-to-end client connection test.
 
 ## Input Safety And Cleanup
 

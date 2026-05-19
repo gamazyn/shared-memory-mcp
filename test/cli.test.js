@@ -77,3 +77,53 @@ test("cli imports memory, prunes items, creates backups, and reports doctor stat
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test("cli rejects invalid handoff status", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const result = runCli(["handoffs", "--status", "nope"], {
+      SHARED_MEMORY_MCP_STORAGE_FILE: join(dir, "contexts.json")
+    })
+
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /status must be one of/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("cli doctor reports missing client configs instead of unconditional ok", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const result = runCli(["doctor"], {
+      HOME: dir,
+      SHARED_MEMORY_MCP_STORAGE_FILE: join(dir, "contexts.json"),
+      SHARED_MEMORY_MCP_BACKUP_DIR: join(dir, "backups")
+    })
+
+    assert.equal(result.status, 0)
+    assert.match(result.stdout, /Codex config: missing/)
+    assert.match(result.stdout, /Claude config: missing/)
+    assert.doesNotMatch(result.stdout, /MCP server: ok/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("cli prints concise errors without stack traces", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shared-memory-mcp-"))
+  try {
+    const importFile = join(dir, "bad.json")
+    await writeFile(importFile, JSON.stringify({ contexts: [{ id: "bad" }] }))
+
+    const result = runCli(["import", importFile], {
+      SHARED_MEMORY_MCP_STORAGE_FILE: join(dir, "contexts.json")
+    })
+
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /type must be a string/)
+    assert.doesNotMatch(result.stderr, /at sanitizeText/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
