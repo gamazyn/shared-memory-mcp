@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, extname } from "node:path"
 
 import { getRuntimeConfig } from "./config.js"
+import { DEFAULT_CLAUDE_SETTINGS_PATH } from "./installers/claude.js"
+import { DEFAULT_CODEX_CONFIG_PATH } from "./installers/codex.js"
 import { createSharedMemoryStore } from "./storage.js"
+
+const HANDOFF_STATUSES = new Set(["all", "pending", "read"])
 
 function parseOptions(args) {
   const options = { _: [] }
@@ -34,6 +38,11 @@ function formatEntry(entry, index) {
 
 function writeOutput(text) {
   process.stdout.write(`${text}\n`)
+}
+
+function validateHandoffStatus(status) {
+  if (!HANDOFF_STATUSES.has(status)) throw new Error("status must be one of: all, pending, read")
+  return status
 }
 
 function writeExport(filePath, data) {
@@ -81,10 +90,11 @@ export async function runCli(argv = process.argv.slice(2), options = {}) {
   }
 
   if (command === "handoffs") {
+    const status = validateHandoffStatus(parsed.status ?? "all")
     const items = store.listHandoffs({
       namespace: parsed.namespace,
       agent: parsed.agent,
-      status: parsed.status ?? "all",
+      status,
       limit: Number(parsed.limit ?? 10)
     })
     writeOutput(items.length ? items.map(formatEntry).join("\n") : "No handoffs found.")
@@ -119,7 +129,9 @@ export async function runCli(argv = process.argv.slice(2), options = {}) {
       `Storage exists: ${existsSync(config.storageFile) ? "yes" : "no"}`,
       `Backup dir: ${config.backupDir}`,
       `Default namespace: ${config.defaultNamespace}`,
-      "MCP server: ok"
+      `Codex config: ${existsSync(DEFAULT_CODEX_CONFIG_PATH) ? "present" : "missing"}`,
+      `Claude config: ${existsSync(DEFAULT_CLAUDE_SETTINGS_PATH) ? "present" : "missing"}`,
+      "MCP server: start with no CLI arguments to verify client connectivity"
     ]
     writeOutput(lines.join("\n"))
     return
