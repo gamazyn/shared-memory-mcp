@@ -72,6 +72,47 @@ Prompts:
 | `prepare_handoff` | Draft a complete handoff for another agent. |
 | `summarize_decisions` | Summarize saved decisions and conflicts. |
 
+## Daily Workflow Example
+
+Use a namespace per project, repository, or long-running workstream. One agent can save decisions and create a handoff:
+
+```text
+save_memory({
+  "namespace": "shared-memory-mcp",
+  "agent": "implementation-agent",
+  "kind": "decision",
+  "title": "Use local JSON storage",
+  "content": "Keep the project local-first and avoid adding an external database.",
+  "tags": ["storage", "architecture"]
+})
+
+create_handoff({
+  "namespace": "shared-memory-mcp",
+  "to": "review-agent",
+  "summary": "Storage changes are implemented and need review.",
+  "context": "Check import/export behavior, redaction, and handoff lifecycle tests."
+})
+```
+
+The next agent starts by loading the same namespace:
+
+```text
+get_project_brief({ "namespace": "shared-memory-mcp" })
+list_handoffs({ "namespace": "shared-memory-mcp", "agent": "review-agent", "status": "pending" })
+read_handoff({ "namespace": "shared-memory-mcp", "agent": "review-agent" })
+```
+
+At the end of a phase, save a durable summary:
+
+```text
+create_snapshot({
+  "namespace": "shared-memory-mcp",
+  "agent": "release-agent",
+  "title": "Phase 1 complete",
+  "content": "Search, namespaces, and handoff lifecycle are implemented and tested."
+})
+```
+
 ## Install From This Repository
 
 ```bash
@@ -85,6 +126,14 @@ Run the MCP server:
 ```bash
 npm start
 ```
+
+For local CLI testing from this checkout, run the bin directly:
+
+```bash
+node ./bin/shared-memory-mcp.js list
+```
+
+After the package is installed as a binary, use `shared-memory-mcp` directly.
 
 ## Configure Clients
 
@@ -189,5 +238,3 @@ npm test
 npm run smoke
 npm pack --dry-run
 ```
-
-Then add repository metadata to `package.json` once the GitHub repository URL exists.
