@@ -8,3 +8,4 @@ contexts.json
 contexts.json.tmp
 *.corrupt-*
 .contexts.lock/
+graphify-out/
