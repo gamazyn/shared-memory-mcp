@@ -13,6 +13,7 @@ import {
   sanitizeTags,
   sanitizeText
 } from "../src/sanitize.js"
+import { redactSecrets, redactTags, sanitizeTimestamp } from "../src/sanitize.js"
 
 test("sanitizeText strips control chars and trims", () => {
   assert.equal(sanitizeText("  hello  ", "field", 100), "hello")
@@ -82,4 +83,21 @@ test("sanitizeStructuredMemoryInput includes optional fields only when present",
   assert.equal(full.kind, "decision")
   assert.equal(full.status, "open")
   assert.equal(full.nextAction, "ship")
+})
+
+test("redactSecrets masks known token shapes and key=value pairs", () => {
+  assert.match(redactSecrets("ghp_" + "a".repeat(30)), /\[REDACTED_TOKEN\]/)
+  assert.match(redactSecrets("sk-" + "b".repeat(30)), /\[REDACTED_TOKEN\]/)
+  assert.match(redactSecrets("api_key=supersecret"), /api_key=\[REDACTED_SECRET\]/)
+  assert.equal(redactSecrets("nothing to hide"), "nothing to hide")
+})
+
+test("redactTags applies redaction to each tag", () => {
+  assert.deepEqual(redactTags(["token=abc123def", "safe"]), ["token=[REDACTED_SECRET]", "safe"])
+})
+
+test("sanitizeTimestamp accepts valid dates and rejects garbage", () => {
+  const iso = "2026-06-12T10:00:00.000Z"
+  assert.equal(sanitizeTimestamp(iso), iso)
+  assert.throws(() => sanitizeTimestamp("not-a-date"), /timestamp must be a valid date/)
 })

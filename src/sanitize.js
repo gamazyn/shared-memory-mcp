@@ -113,3 +113,21 @@ export function sanitizeStructuredMemoryInput({
 
   return input
 }
+
+export function redactSecrets(value) {
+  return value
+    .replace(/\b(?:gho|ghp|github_pat)_[A-Za-z0-9_]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\b(api[_-]?key|token|secret|password)=([^\s]+)/gi, "$1=[REDACTED_SECRET]")
+}
+
+export function redactTags(tags) {
+  return tags.map(tag => redactSecrets(tag))
+}
+
+export function sanitizeTimestamp(timestamp) {
+  const safeTimestamp = sanitizeText(timestamp, "timestamp", INPUT_LIMITS.content)
+  if (Number.isNaN(Date.parse(safeTimestamp))) throw new Error("timestamp must be a valid date")
+  return safeTimestamp
+}
