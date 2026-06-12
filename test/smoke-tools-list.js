@@ -34,7 +34,7 @@ function runSession(requests) {
   })
 }
 
-// --- Session 1: list/read smoke (empty store) + create_handoff ---
+// --- Session 1: list/read smoke (empty store only, no writes) ---
 const responses = await runSession([
   {
     jsonrpc: "2.0",
@@ -73,15 +73,6 @@ const responses = await runSession([
     id: 9,
     method: "prompts/get",
     params: { name: "load_project_memory", arguments: { namespace: "smoke-namespace" } }
-  },
-  {
-    jsonrpc: "2.0",
-    id: 10,
-    method: "tools/call",
-    params: {
-      name: "create_handoff",
-      arguments: { namespace: "smoke-namespace", to: "smoke-agent", summary: "smoke summary", context: "smoke context" }
-    }
   }
 ])
 
@@ -126,11 +117,34 @@ assert.match(namespaceBrief, /smoke-namespace/)
 assert.match(namespaceHandoffs, /No handoffs found/)
 assert.match(loadPrompt, /smoke-namespace/)
 
-const handoffCreated = responses.find(response => response.id === 10).result.content[0].text
+// --- Session 2: create_handoff (isolated write session) ---
+const responses2 = await runSession([
+  {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "smoke-test", version: "1.0.0" }
+    }
+  },
+  {
+    jsonrpc: "2.0",
+    id: 10,
+    method: "tools/call",
+    params: {
+      name: "create_handoff",
+      arguments: { namespace: "smoke-namespace", to: "smoke-agent", summary: "smoke summary", context: "smoke context" }
+    }
+  }
+])
+
+const handoffCreated = responses2.find(response => response.id === 10).result.content[0].text
 assert.match(handoffCreated, /Handoff created for smoke-agent/)
 
-// --- Session 2: read_handoff (handoff now exists in store) ---
-const responses2 = await runSession([
+// --- Session 3: read_handoff (handoff now exists in store) ---
+const responses3 = await runSession([
   {
     jsonrpc: "2.0",
     id: 1,
@@ -152,7 +166,7 @@ const responses2 = await runSession([
   }
 ])
 
-const handoffRead = responses2.find(response => response.id === 11).result.content[0].text
+const handoffRead = responses3.find(response => response.id === 11).result.content[0].text
 assert.match(handoffRead, /## Summary\nsmoke summary/)
 assert.match(handoffRead, /## Full Context\nsmoke context/)
 
