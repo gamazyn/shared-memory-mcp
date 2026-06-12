@@ -104,3 +104,12 @@ test("server registers resources and prompts", async () => {
     ])
   })
 })
+
+test("save_context tool schema advertises title/content maxLength from INPUT_LIMITS", async () => {
+  await withClient(async client => {
+    const { tools } = await client.listTools()
+    const saveContext = tools.find(t => t.name === "save_context")
+    assert.equal(saveContext.inputSchema.properties.title.maxLength, 200)
+    assert.equal(saveContext.inputSchema.properties.content.maxLength, 200000)
+  })
+})
