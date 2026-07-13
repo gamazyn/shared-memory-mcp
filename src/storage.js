@@ -18,6 +18,9 @@ import {
   DEFAULT_STORAGE_FILE
 } from "./config.js"
 import {
+  INPUT_LIMITS,
+  redactSecrets,
+  redactTags,
   sanitizeContextInput,
   sanitizeHandoffInput,
   sanitizeKind,
@@ -26,25 +29,13 @@ import {
   sanitizeStructuredMemoryInput,
   sanitizeTags,
   sanitizeText,
-  INPUT_LIMITS
+  sanitizeTimestamp
 } from "./sanitize.js"
 
 const LOCK_RETRY_MS = 20
 const LOCK_TIMEOUT_MS = 5000
 const LOCK_STALE_MS = 30000
 const DEFAULT_NAMESPACE = "default"
-
-function redactSecrets(value) {
-  return value
-    .replace(/\b(?:gho|ghp|github_pat)_[A-Za-z0-9_]{20,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\b(api[_-]?key|token|secret|password)=([^\s]+)/gi, "$1=[REDACTED_SECRET]")
-}
-
-function redactTags(tags) {
-  return tags.map(tag => redactSecrets(tag))
-}
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
@@ -200,12 +191,6 @@ export function createSharedMemoryStore(options = {}) {
     if (Array.isArray(redacted.tags)) redacted.tags = redactTagList(redacted.tags)
     if (Array.isArray(redacted.relatedFiles)) redacted.relatedFiles = redactTagList(redacted.relatedFiles)
     return redacted
-  }
-
-  function sanitizeTimestamp(timestamp) {
-    const safeTimestamp = sanitizeText(timestamp, "timestamp", INPUT_LIMITS.content)
-    if (Number.isNaN(Date.parse(safeTimestamp))) throw new Error("timestamp must be a valid date")
-    return safeTimestamp
   }
 
   function hasProvidedValue(value) {
