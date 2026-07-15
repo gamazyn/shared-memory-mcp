@@ -29,7 +29,8 @@ export async function configureClaude(options = {}) {
   if (!settings.permissions.allow.includes(permission)) settings.permissions.allow.push(permission)
 
   settings.mcpServers ??= {}
-  settings.mcpServers[serverName] = { command, args }
+  // Merge over any existing entry so custom fields (type, env, ...) survive re-runs.
+  settings.mcpServers[serverName] = { ...settings.mcpServers[serverName], command, args }
 
   await mkdir(dirname(settingsPath), { recursive: true })
   await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`)
