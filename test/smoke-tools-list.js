@@ -1,9 +1,13 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import { rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-rmSync("/tmp/shared-memory-mcp-smoke.json", { force: true })
-rmSync("/tmp/shared-memory-mcp-smoke.json.tmp", { force: true })
+const smokeStorageFile = join(tmpdir(), "shared-memory-mcp-smoke.json")
+
+rmSync(smokeStorageFile, { force: true })
+rmSync(`${smokeStorageFile}.tmp`, { force: true })
 
 function runSession(requests) {
   return new Promise((resolve, reject) => {
@@ -11,7 +15,7 @@ function runSession(requests) {
       stdio: ["pipe", "pipe", "inherit"],
       env: {
         ...process.env,
-        SHARED_MEMORY_MCP_STORAGE_FILE: "/tmp/shared-memory-mcp-smoke.json"
+        SHARED_MEMORY_MCP_STORAGE_FILE: smokeStorageFile
       }
     })
 
