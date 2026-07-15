@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { getRuntimeConfig } from "./config.js"
+import { schemas } from "./schemas.js"
 import { createSharedMemoryStore } from "./storage.js"
 import { registerResources } from "./server/resources.js"
 import { registerPrompts } from "./server/prompts.js"
