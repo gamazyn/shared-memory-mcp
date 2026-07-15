@@ -53,7 +53,7 @@ test("getLocalServerCommand uses a version-agnostic node command", () => {
   const local = getLocalServerCommand()
   assert.equal(local.command, "node")
   assert.doesNotMatch(local.command, /Cellar|\/node\/\d+\.\d+\.\d+\//)
-  assert.match(local.args[0], /bin\/shared-memory-mcp\.js$/)
+  assert.match(local.args[0], /[\\/]bin[\\/]shared-memory-mcp\.js$/)
 })
 
 test("configureClaude preserves existing entry fields when updating command", async () => {
